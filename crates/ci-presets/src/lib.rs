@@ -286,7 +286,7 @@ fn print_diff(path: &Path, generated: &str) -> Result<()> {
     cmd.arg(left).arg(&temp_path);
     let output = cmd.output().map_err(ForgeError::io(format!("running diff for {}", path.display())))?;
     let stdout = String::from_utf8_lossy(&output.stdout);
-    print!("{stdout}");
+    print!("\n--- {} ---\n{stdout}", path.display());
     std::fs::remove_file(&temp_path).ok();
     Ok(())
 }
