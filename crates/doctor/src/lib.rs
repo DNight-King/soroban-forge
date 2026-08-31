@@ -961,6 +961,31 @@ fn config_network_url(config: Option<&soroban_forge_core::config::ForgeConfig>) 
     }
 }
 
+fn normalize_check_name(name: &str) -> String {
+    name.to_ascii_lowercase()
+        .replace(" ", "-")
+        .replace("_", "-")
+}
+
+fn list_check_names() -> Vec<&'static str> {
+    vec![
+        "rustc",
+        "cargo",
+        "wasm32v1-none-target",
+        "wasm32-unknown-unknown",
+        "stellar-cli",
+        "testnet-rpc",
+        "git",
+        "git-identity",
+        "docker",
+        "toolchain",
+        "soroban-sdk",
+        "release-opt-level",
+        "release-lto",
+        "release-codegen-units",
+    ]
+}
+
 /// The `doctor` subcommand.
 pub struct DoctorPlugin;
 
@@ -1069,6 +1094,18 @@ impl ForgePlugin for DoctorPlugin {
                          of the current project and report success/failure with timing",
                     ),
             )
+            .arg(
+                Arg::new("check")
+                    .long("check")
+                    .value_name("NAME")
+                    .help("Run only the named check (use --list-checks to see valid choices)"),
+            )
+            .arg(
+                Arg::new("list-checks")
+                    .long("list-checks")
+                    .action(ArgAction::SetTrue)
+                    .help("Print the available check names and exit"),
+            )
     }
 
     fn run(&self, matches: &ArgMatches, ctx: &ForgeContext) -> Result<()> {
@@ -1076,6 +1113,23 @@ impl ForgePlugin for DoctorPlugin {
         let do_fix = matches.get_flag("fix");
         let do_build = matches.get_flag("build");
         let assume_yes = ctx.yes || matches.get_flag("yes");
+        let selected_check = matches.get_one::<String>("check").map(String::as_str);
+        let list_checks = matches.get_flag("list-checks");
+
+        if list_checks {
+            println!("{}", list_check_names().join("\n"));
+            return Ok(());
+        }
+
+        if let Some(selected) = selected_check {
+            let normalized = normalize_check_name(selected);
+            if !list_check_names().iter().any(|n| normalize_check_name(n) == normalized) {
+                return Err(ForgeError::InvalidArgument(format!(
+                    "unknown doctor check `{selected}` (valid: {})",
+                    list_check_names().join(", ")
+                )));
+            }
+        }
 
         if ctx.offline && do_fix {
             return Err(ForgeError::InvalidArgument(
@@ -1085,6 +1139,12 @@ impl ForgePlugin for DoctorPlugin {
         }
 
         let mut checks = self.gather_checks(ctx, do_build);
+        if let Some(selected) = selected_check {
+            checks = checks
+                .into_iter()
+                .filter(|check| normalize_check_name(check.name) == normalize_check_name(selected))
+                .collect();
+        }
 
         if do_fix {
             let remedies = fixable_remedies(&checks);
@@ -1098,6 +1158,12 @@ impl ForgePlugin for DoctorPlugin {
                 // Re-check so the final report reflects the fixes; any
                 // non-fixable issues (and any remedy that failed) remain.
                 checks = self.gather_checks(ctx, do_build);
+                if let Some(selected) = selected_check {
+                    checks = checks
+                        .into_iter()
+                        .filter(|check| normalize_check_name(check.name) == normalize_check_name(selected))
+                        .collect();
+                }
             }
         }
 
