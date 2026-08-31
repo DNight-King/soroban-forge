@@ -132,6 +132,22 @@ pub fn parse_semverish(version: &str) -> Option<(u32, u32, u32)> {
     Some((major, minor, patch))
 }
 
+fn stellar_cli_version(line: &str) -> Option<(u32, u32, u32)> {
+    line.split_whitespace()
+        .find_map(|word| parse_semverish(word))
+}
+
+fn known_broken_stellar_cli_replacement(line: &str) -> Option<&'static str> {
+    let version = stellar_cli_version(line)?;
+    match version {
+        (27, 0, 0) => Some("27.0.1"),
+        (27, 0, 1) => Some("27.1.0"),
+        (28, 0, 0) => Some("28.0.1"),
+        (29, 0, 0) => Some("29.0.1"),
+        _ => None,
+    }
+}
+
 /// Extract the declared `soroban-sdk` version from a parsed manifest.
 ///
 /// Outer `Option`: whether the manifest declares a `soroban-sdk` dependency
@@ -661,14 +677,27 @@ pub fn run_checks_with_network(allow_network: bool) -> Vec<Check> {
         });
     }
 
-    // stellar-cli — presence and minimum version (issue #47).
+    // stellar-cli — presence, minimum version and known-bad releases.
     checks.push(match capture("stellar", &["--version"]) {
-        Some(line) if version_at_least(&line, MIN_STELLAR) => Check {
-            name: "stellar-cli",
-            status: Status::Pass,
-            detail: line,
-            fix: None,
-        },
+        Some(line) if version_at_least(&line, MIN_STELLAR) => {
+            if let Some(recommended) = known_broken_stellar_cli_replacement(&line) {
+                Check {
+                    name: "stellar-cli",
+                    status: Status::Warn,
+                    detail: format!("{line} (known-broken release; upgrade to {recommended})"),
+                    fix: Some(
+                        "upgrade: cargo install --locked stellar-cli  (or: brew upgrade stellar-cli)",
+                    ),
+                }
+            } else {
+                Check {
+                    name: "stellar-cli",
+                    status: Status::Pass,
+                    detail: line,
+                    fix: None,
+                }
+            }
+        }
         Some(line) => Check {
             name: "stellar-cli",
             status: Status::Warn,
@@ -1182,6 +1211,13 @@ mod tests {
         assert_eq!(parse_semverish("1.2.3-rc.1"), Some((1, 2, 3)));
         assert_eq!(parse_semverish("*"), None);
         assert_eq!(parse_semverish("garbage"), None);
+    }
+
+    #[test]
+    fn known_bad_stellar_cli_versions_warn_with_recommendation() {
+        assert_eq!(known_broken_stellar_cli_replacement("stellar-cli 27.0.0"), Some("27.0.1"));
+        assert_eq!(known_broken_stellar_cli_replacement("stellar-cli 28.0.0"), Some("28.0.1"));
+        assert_eq!(known_broken_stellar_cli_replacement("stellar-cli 26.1.0"), None);
     }
 
     #[test]
