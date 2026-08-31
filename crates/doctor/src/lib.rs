@@ -1387,6 +1387,68 @@ mod tests {
     }
 
     #[test]
+    fn fixable_remedies_skip_already_fixed_checks() {
+        let checks = vec![
+            Check {
+                name: "wasm32v1-none target",
+                status: Status::Pass,
+                detail: "installed".into(),
+                fix: None,
+            },
+            Check {
+                name: "stellar-cli",
+                status: Status::Fail,
+                detail: "not found".into(),
+                fix: Some("install: brew install stellar-cli"),
+            },
+        ];
+
+        let remedies = fixable_remedies(&checks);
+        assert_eq!(remedies.len(), 1);
+        assert_eq!(remedies[0].check, "stellar-cli");
+    }
+
+    #[test]
+    fn partial_fix_keeps_remaining_failures_for_re_run() {
+        let checks = vec![
+            Check {
+                name: "wasm32v1-none target",
+                status: Status::Fail,
+                detail: "not installed".into(),
+                fix: Some("rustup target add wasm32v1-none"),
+            },
+            Check {
+                name: "stellar-cli",
+                status: Status::Fail,
+                detail: "not found".into(),
+                fix: Some("install: brew install stellar-cli"),
+            },
+        ];
+
+        let first = fixable_remedies(&checks);
+        assert_eq!(first.len(), 2);
+
+        let next = vec![
+            Check {
+                name: "wasm32v1-none target",
+                status: Status::Pass,
+                detail: "installed".into(),
+                fix: None,
+            },
+            Check {
+                name: "stellar-cli",
+                status: Status::Fail,
+                detail: "not found".into(),
+                fix: Some("install: brew install stellar-cli"),
+            },
+        ];
+
+        let remaining = fixable_remedies(&next);
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].check, "stellar-cli");
+    }
+
+    #[test]
     fn toolchain_reports_pinned_version_when_not_a_named_channel() {
         let check = classify_toolchain(Some("1.84.0-x86_64-unknown-linux-gnu"), None);
         assert!(check.detail.contains("channel: pinned"));
