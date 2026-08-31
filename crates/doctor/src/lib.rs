@@ -947,6 +947,20 @@ fn confirm(prompt: &str) -> bool {
     matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes")
 }
 
+fn config_network_url(config: Option<&soroban_forge_core::config::ForgeConfig>) -> Option<String> {
+    let config = config?;
+    if let Some(url) = config.network.rpc_url.as_deref() {
+        return Some(url.to_owned());
+    }
+    let name = config.network.name.as_deref()?;
+    match name {
+        "testnet" => Some(TESTNET_RPC_URL.to_string()),
+        "futurenet" => Some("https://rpc-futurenet.stellar.org".to_string()),
+        "localnet" => Some("http://localhost:8000/soroban/rpc".to_string()),
+        _ => Some(name.to_string()),
+    }
+}
+
 /// The `doctor` subcommand.
 pub struct DoctorPlugin;
 
@@ -958,16 +972,14 @@ impl DoctorPlugin {
     /// check (issue #72), which is otherwise skipped since it is much slower
     /// than the rest of the report.
     fn gather_checks(&self, ctx: &ForgeContext, do_build: bool) -> Vec<Check> {
-        let mut checks = run_checks_with_network(!ctx.offline);
-        checks.push(toolchain_check(&ctx.cwd)); // issue #109
-        if ctx.offline {
-            checks.push(Check {
-                name: "testnet RPC",
-                status: Status::Warn,
-                detail: "skipped (--offline)".into(),
-                fix: None,
-            });
+        let mut checks = Vec::new();
+        if !ctx.offline {
+            let url = config_network_url(ctx.config.as_ref())
+                .unwrap_or_else(|| TESTNET_RPC_URL.to_string());
+            checks.push(rpc_connectivity_check(&url));
         }
+        checks.extend(run_checks_with_network(false));
+        checks.push(toolchain_check(&ctx.cwd)); // issue #109
         if let Some(check) = sdk_version_check(&ctx.cwd) {
             checks.push(check);
         }
